@@ -1,0 +1,42 @@
+# Production overrides for celery-workers
+# Use with: helm install -f values.yaml -f values.production.yaml
+
+global:
+  image:
+    repository: your-production-registry/celery-app
+    pullPolicy: Always
+  
+  env:
+    - name: CELERY_BROKER_URL
+      value: "redis://production-redis:6379/0"
+    - name: CELERY_RESULT_BACKEND
+      value: "redis://production-redis:6379/0"
+    - name: ENVIRONMENT
+      value: "production"
+    - name: LOG_LEVEL
+      value: "WARNING"
+
+workers:
+  default:
+    replicaCount: 5
+    autoscaling:
+      enabled: true
+      minReplicas: 3
+      maxReplicas: 20
+
+  priority:
+    replicaCount: 3
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+
+  compute:
+    replicaCount: 6
+    resources:
+      requests:
+        memory: "4Gi"
+        cpu: "2000m"
+      limits:
+        memory: "8Gi"
+        cpu: "4000m"

@@ -1,0 +1,220 @@
+# Global configuration
+global:
+  image:
+    repository: your-registry/celery-app
+    tag: latest
+    pullPolicy: IfNotPresent
+  
+  # Image pull secrets if needed
+  imagePullSecrets: []
+    # - name: your-registry-secret
+  
+  # Environment variables common to all workers
+  env:
+    - name: CELERY_BROKER_URL
+      value: "redis://redis-service:6379/0"
+    - name: CELERY_RESULT_BACKEND
+      value: "redis://redis-service:6379/0"
+    - name: ENVIRONMENT
+      value: "production"
+  
+  # Additional environment variables from secrets/configmaps
+  envFrom: []
+    # - secretRef:
+    #     name: celery-secrets
+    # - configMapRef:
+    #     name: celery-config
+
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Service Account
+serviceAccount:
+  create: true
+  name: celery-workers
+  annotations: {}
+
+# Worker configurations
+workers:
+  # Worker 1: Default queue worker
+  default:
+    enabled: true
+    name: default-worker
+    replicaCount: 3
+    queue: default
+    concurrency: 4
+    # Override global resources if needed
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "500m"
+    # Additional worker-specific environment variables
+    extraEnv: []
+    # Worker-specific command arguments
+    extraArgs: []
+    # Autoscaling configuration
+    autoscaling:
+      enabled: false
+      minReplicas: 2
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 80
+      targetMemoryUtilizationPercentage: 80
+
+  # Worker 2: Priority queue worker
+  priority:
+    enabled: true
+    name: priority-worker
+    replicaCount: 2
+    queue: priority
+    concurrency: 2
+    resources:
+      requests:
+        memory: "512Mi"
+        cpu: "200m"
+      limits:
+        memory: "1Gi"
+        cpu: "1000m"
+    extraEnv: []
+    extraArgs: []
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 5
+      targetCPUUtilizationPercentage: 70
+
+  # Worker 3: Email queue worker
+  email:
+    enabled: true
+    name: email-worker
+    replicaCount: 2
+    queue: email
+    concurrency: 10
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "50m"
+      limits:
+        memory: "256Mi"
+        cpu: "200m"
+    extraEnv:
+      - name: EMAIL_BACKEND
+        value: "smtp"
+    extraArgs: []
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 3
+      targetCPUUtilizationPercentage: 80
+
+  # Worker 4: Heavy computation worker
+  compute:
+    enabled: true
+    name: compute-worker
+    replicaCount: 4
+    queue: compute
+    concurrency: 1
+    resources:
+      requests:
+        memory: "2Gi"
+        cpu: "1000m"
+      limits:
+        memory: "4Gi"
+        cpu: "2000m"
+    extraEnv: []
+    extraArgs:
+      - "--max-tasks-per-child=1"
+    autoscaling:
+      enabled: true
+      minReplicas: 2
+      maxReplicas: 10
+      targetCPUUtilizationPercentage: 60
+
+  # Worker 5: Report generation worker
+  reports:
+    enabled: true
+    name: report-worker
+    replicaCount: 2
+    queue: reports
+    concurrency: 2
+    resources:
+      requests:
+        memory: "1Gi"
+        cpu: "500m"
+      limits:
+        memory: "2Gi"
+        cpu: "1000m"
+    extraEnv:
+      - name: REPORT_STORAGE_PATH
+        value: "/tmp/reports"
+    extraArgs:
+      - "--time-limit=3600"
+    autoscaling:
+      enabled: false
+      minReplicas: 1
+      maxReplicas: 4
+      targetCPUUtilizationPercentage: 70
+
+  # Worker 6: Webhook/API call worker
+  webhooks:
+    enabled: true
+    name: webhook-worker
+    replicaCount: 3
+    queue: webhooks
+    concurrency: 5
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
+      limits:
+        memory: "512Mi"
+        cpu: "300m"
+    extraEnv:
+      - name: HTTP_TIMEOUT
+        value: "30"
+    extraArgs:
+      - "--soft-time-limit=60"
+      - "--time-limit=120"
+    autoscaling:
+      enabled: false
+      minReplicas: 2
+      maxReplicas: 8
+      targetCPUUtilizationPercentage: 75
+
+# ConfigMap for shared configuration
+configMap:
+  enabled: true
+  data:
+    celery.conf: |
+      # Celery configuration
+      task_serializer = 'json'
+      accept_content = ['json']
+      result_serializer = 'json'
+      timezone = 'UTC'
+      enable_utc = True
+
+# Health checks
+healthcheck:
+  liveness:
+    enabled: true
+    initialDelaySeconds: 30
+    periodSeconds: 60
+    timeoutSeconds: 10
+    failureThreshold: 3
+  readiness:
+    enabled: true
+    initialDelaySeconds: 10
+    periodSeconds: 30
+    timeoutSeconds: 5
+    failureThreshold: 3
