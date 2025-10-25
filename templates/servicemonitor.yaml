@@ -1,0 +1,23 @@
+{{- if .Values.monitoring.enabled }}
+{{- range $workerName, $worker := .Values.workers }}
+{{- if $worker.enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "celery-workers.fullname" $ }}-{{ $workerName }}
+  labels:
+    {{- include "celery-workers.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $workerName }}-worker
+spec:
+  selector:
+    matchLabels:
+      {{- include "celery-workers.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $workerName }}-worker
+  endpoints:
+  - port: metrics
+    interval: 30s
+    path: /metrics
+{{- end }}
+{{- end }}
+{{- end }}

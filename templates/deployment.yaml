@@ -1,0 +1,174 @@
+{{- range $workerName, $worker := .Values.workers }}
+{{- if $worker.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "celery-workers.fullname" $ }}-{{ $workerName }}
+  labels:
+    {{- include "celery-workers.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $workerName }}-worker
+    worker-type: {{ $workerName }}
+spec:
+  {{- if not $worker.autoscaling.enabled }}
+  replicas: {{ $worker.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "celery-workers.selectorLabels" $ | nindent 6 }}
+      app.kubernetes.io/component: {{ $workerName }}-worker
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
+      labels:
+        {{- include "celery-workers.selectorLabels" $ | nindent 8 }}
+        app.kubernetes.io/component: {{ $workerName }}-worker
+        worker-type: {{ $workerName }}
+    spec:
+      {{- with $.Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "celery-workers.serviceAccountName" $ }}
+      containers:
+      - name: celery-worker
+        image: "{{ $.Values.global.image.repository }}:{{ $.Values.global.image.tag }}"
+        imagePullPolicy: {{ $.Values.global.image.pullPolicy }}
+        command:
+          - celery
+          - -A
+          - your_app_name  # Replace with your Celery app name
+          - worker
+          - --loglevel=info
+          - --queues={{ $worker.queue }}
+          - --concurrency={{ $worker.concurrency }}
+          - --hostname={{ $worker.name }}@%n
+          {{- range $worker.extraArgs }}
+          - {{ . }}
+          {{- end }}
+        env:
+        {{- range $.Values.global.env }}
+        - name: {{ .name }}
+          value: {{ .value | quote }}
+        {{- end }}
+        {{- range $worker.extraEnv }}
+        - name: {{ .name }}
+          value: {{ .value | quote }}
+        {{- end }}
+        - name: CELERY_WORKER_NAME
+          value: {{ $worker.name }}
+        - name: CELERY_QUEUE
+          value: {{ $worker.queue }}
+        - name: CELERY_CONCURRENCY
+          value: {{ $worker.concurrency | quote }}
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        {{- with $.Values.global.envFrom }}
+        envFrom:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        resources:
+          {{- if $worker.resources }}
+          {{- toYaml $worker.resources | nindent 10 }}
+          {{- else }}
+          {{- toYaml $.Values.global.resources | nindent 10 }}
+          {{- end }}
+        {{- if $.Values.healthcheck.liveness.enabled }}
+        livenessProbe:
+          exec:
+            command:
+              - celery
+              - -A
+              - your_app_name  # Replace with your Celery app name
+              - inspect
+              - ping
+              - --destination
+              - celery@$(POD_NAME)
+          initialDelaySeconds: {{ $.Values.healthcheck.liveness.initialDelaySeconds }}
+          periodSeconds: {{ $.Values.healthcheck.liveness.periodSeconds }}
+          timeoutSeconds: {{ $.Values.healthcheck.liveness.timeoutSeconds }}
+          failureThreshold: {{ $.Values.healthcheck.liveness.failureThreshold }}
+        {{- end }}
+        {{- if $.Values.healthcheck.readiness.enabled }}
+        readinessProbe:
+          exec:
+            command:
+              - celery
+              - -A
+              - your_app_name  # Replace with your Celery app name
+              - inspect
+              - ping
+              - --destination
+              - celery@$(POD_NAME)
+          initialDelaySeconds: {{ $.Values.healthcheck.readiness.initialDelaySeconds }}
+          periodSeconds: {{ $.Values.healthcheck.readiness.periodSeconds }}
+          timeoutSeconds: {{ $.Values.healthcheck.readiness.timeoutSeconds }}
+          failureThreshold: {{ $.Values.healthcheck.readiness.failureThreshold }}
+        {{- end }}
+        {{- if $.Values.configMap.enabled }}
+        volumeMounts:
+        - name: config
+          mountPath: /etc/celery
+          readOnly: true
+        {{- end }}
+      {{- if $.Values.configMap.enabled }}
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "celery-workers.fullname" $ }}-config
+      {{- end }}
+      {{- with $.Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.global.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+---
+{{- if $worker.autoscaling.enabled }}
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "celery-workers.fullname" $ }}-{{ $workerName }}
+  labels:
+    {{- include "celery-workers.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ $workerName }}-worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "celery-workers.fullname" $ }}-{{ $workerName }}
+  minReplicas: {{ $worker.autoscaling.minReplicas }}
+  maxReplicas: {{ $worker.autoscaling.maxReplicas }}
+  metrics:
+  {{- if $worker.autoscaling.targetCPUUtilizationPercentage }}
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: {{ $worker.autoscaling.targetCPUUtilizationPercentage }}
+  {{- end }}
+  {{- if $worker.autoscaling.targetMemoryUtilizationPercentage }}
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: {{ $worker.autoscaling.targetMemoryUtilizationPercentage }}
+  {{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
